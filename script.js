@@ -1,7 +1,7 @@
 // ============================================================
-//   NEON FISH
-//   Cardume de peixes pastel que persegue o mouse lentamente
-//   + cursor personalizado em cruz neon
+//   NEON FISH — v2.0
+//   Cenário de fundo do mar + peixes que seguem o mouse
+//   (NPCs entram nas próximas versões)
 // ============================================================
 
 const canvas = document.getElementById('canvas');
@@ -39,7 +39,114 @@ const PALETTES = [
 ];
 
 // ============================================================
-//   Bolhas de fundo
+//   CENÁRIO 1: Raios de luz (god rays)
+// ============================================================
+const godRays = [];
+function initGodRays() {
+    godRays.length = 0;
+    const count = 7;
+    for (let i = 0; i < count; i++) {
+        godRays.push({
+            x: (i / (count - 1)) * W + (Math.random() - 0.5) * 100,
+            width: 60 + Math.random() * 120,
+            alpha: 0.03 + Math.random() * 0.05,
+            speed: 0.02 + Math.random() * 0.04,
+            phase: Math.random() * Math.PI * 2,
+            length: H * (0.7 + Math.random() * 0.3)
+        });
+    }
+}
+
+function drawGodRays(t) {
+    for (const ray of godRays) {
+        const offset = Math.sin(t * ray.speed + ray.phase) * 30;
+        const x = ray.x + offset;
+
+        const grad = ctx.createLinearGradient(x, 0, x + ray.width * 0.5, ray.length);
+        grad.addColorStop(0, `rgba(180, 220, 255, ${ray.alpha})`);
+        grad.addColorStop(0.5, `rgba(140, 200, 255, ${ray.alpha * 0.5})`);
+        grad.addColorStop(1, 'rgba(140, 200, 255, 0)');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + ray.width, 0);
+        ctx.lineTo(x + ray.width + ray.width * 0.4, ray.length);
+        ctx.lineTo(x - ray.width * 0.2, ray.length);
+        ctx.closePath();
+        ctx.fill();
+    }
+}
+
+// ============================================================
+//   CENÁRIO 2: Plâncton (partículas flutuando)
+// ============================================================
+const plankton = [];
+function initPlankton() {
+    plankton.length = 0;
+    for (let i = 0; i < 120; i++) {
+        plankton.push({
+            x: Math.random() * W,
+            y: Math.random() * H,
+            vx: (Math.random() - 0.5) * 0.15,
+            vy: (Math.random() - 0.5) * 0.15,
+            r: 0.6 + Math.random() * 1.4,
+            alpha: 0.15 + Math.random() * 0.35,
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+}
+
+function updatePlankton(t) {
+    for (const p of plankton) {
+        p.x += p.vx + Math.sin(t * 0.5 + p.phase) * 0.05;
+        p.y += p.vy + Math.cos(t * 0.4 + p.phase) * 0.05;
+
+        // Envolve nas bordas
+        if (p.x < 0) p.x = W;
+        if (p.x > W) p.x = 0;
+        if (p.y < 0) p.y = H;
+        if (p.y > H) p.y = 0;
+    }
+}
+
+function drawPlankton() {
+    for (const p of plankton) {
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(200, 230, 255, ${p.alpha})`;
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// ============================================================
+//   CENÁRIO 3: Vinheta (borda escura)
+// ============================================================
+function drawVignette() {
+    const grad = ctx.createRadialGradient(
+        W / 2, H / 2, Math.min(W, H) * 0.3,
+        W / 2, H / 2, Math.max(W, H) * 0.75
+    );
+    grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0.55)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+}
+
+// ============================================================
+//   CENÁRIO 4: Fundo com gradiente vertical
+// ============================================================
+function drawBackground() {
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0f1a2e');     // azul mais claro em cima (luz do sol)
+    grad.addColorStop(0.5, '#0a1220');   // meio
+    grad.addColorStop(1, '#050810');     // quase preto embaixo (abissal)
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+}
+
+// ============================================================
+//   Bolhas de fundo (já existiam, mantidas)
 // ============================================================
 class Bubble {
     constructor() {
@@ -52,10 +159,11 @@ class Bubble {
         this.r = 2 + Math.random() * 4;
         this.speed = 0.2 + Math.random() * 0.5;
         this.alpha = 0.15 + Math.random() * 0.25;
+        this.phase = Math.random() * Math.PI * 2;
     }
-    update() {
+    update(t) {
         this.y -= this.speed;
-        this.x += Math.sin(this.y * 0.02) * 0.3;
+        this.x += Math.sin(t * 0.02 + this.phase) * 0.3;
         if (this.y < -20) this.reset();
     }
     draw() {
@@ -64,6 +172,12 @@ class Bubble {
         ctx.lineWidth = 1;
         ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
         ctx.stroke();
+
+        // Highlight pequeno (efeito de vidro)
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha * 0.8})`;
+        ctx.arc(this.x - this.r * 0.3, this.y - this.r * 0.3, this.r * 0.25, 0, Math.PI * 2);
+        ctx.fill();
     }
 }
 
@@ -71,7 +185,7 @@ const bubbles = [];
 for (let i = 0; i < 40; i++) bubbles.push(new Bubble());
 
 // ============================================================
-//   Partículas de rastro
+//   Partículas de rastro (nos peixes)
 // ============================================================
 const particles = [];
 
@@ -106,7 +220,7 @@ function drawParticles() {
 }
 
 // ============================================================
-//   Peixe
+//   Peixe (mantido, com "aquário fechado" — quica nas bordas)
 // ============================================================
 class Fish {
     constructor(palette, offset) {
@@ -119,12 +233,10 @@ class Fish {
         this.vy = 0;
         this.angle = 0;
 
-        // Steering
         this.maxSpeed = 2.2;
         this.maxForce = 0.05;
         this.perception = 200;
 
-        // Visual
         this.size = 22 + Math.random() * 8;
         this.tailPhase = Math.random() * Math.PI * 2;
     }
@@ -184,10 +296,27 @@ class Fish {
             );
         }
 
-        if (this.x < -50) this.x = W + 50;
-        if (this.x > W + 50) this.x = -50;
-        if (this.y < -50) this.y = H + 50;
-        if (this.y > H + 50) this.y = -50;
+        // ========================================
+        // AQUÁRIO FECHADO: quica nas bordas
+        // (substitui o antigo wraparound)
+        // ========================================
+        const margin = 25;
+        if (this.x < margin) {
+            this.x = margin;
+            this.vx = Math.abs(this.vx) * 0.6;
+        }
+        if (this.x > W - margin) {
+            this.x = W - margin;
+            this.vx = -Math.abs(this.vx) * 0.6;
+        }
+        if (this.y < margin) {
+            this.y = margin;
+            this.vy = Math.abs(this.vy) * 0.6;
+        }
+        if (this.y > H - margin) {
+            this.y = H - margin;
+            this.vy = -Math.abs(this.vy) * 0.6;
+        }
     }
 
     draw() {
@@ -261,7 +390,6 @@ function drawCursor() {
     ctx.strokeStyle = 'rgba(200, 182, 255, 0.95)';
     ctx.lineWidth = 1.6;
 
-    // Cruz
     ctx.beginPath();
     ctx.moveTo(mouse.x - 9, mouse.y);
     ctx.lineTo(mouse.x + 9, mouse.y);
@@ -269,14 +397,12 @@ function drawCursor() {
     ctx.lineTo(mouse.x, mouse.y + 9);
     ctx.stroke();
 
-    // Anel externo
     ctx.beginPath();
     ctx.strokeStyle = 'rgba(255, 200, 220, 0.55)';
     ctx.lineWidth = 1;
     ctx.arc(mouse.x, mouse.y, 14, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Ponto central
     ctx.beginPath();
     ctx.fillStyle = 'rgba(255, 200, 220, 0.95)';
     ctx.arc(mouse.x, mouse.y, 2.2, 0, Math.PI * 2);
@@ -296,27 +422,47 @@ for (let i = 0; i < fishCount; i++) {
 }
 
 // ============================================================
-//   Loop
+//   Init do cenário
 // ============================================================
+initGodRays();
+initPlankton();
+window.addEventListener('resize', () => {
+    initGodRays();
+    initPlankton();
+});
+
+// ============================================================
+//   Loop principal
+// ============================================================
+let startTime = performance.now();
+
 function loop() {
-    // Fundo com gradiente (efeito de água profunda)
-    const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H));
-    grad.addColorStop(0, '#12121f');
-    grad.addColorStop(1, '#0a0a14');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
+    const t = (performance.now() - startTime) * 0.001; // tempo em segundos
 
-    // Bolhas ao fundo
-    for (const b of bubbles) { b.update(); b.draw(); }
+    // 1. Fundo (gradiente vertical)
+    drawBackground();
 
-    // Partículas de rastro
+    // 2. Raios de luz (god rays)
+    drawGodRays(t);
+
+    // 3. Plâncton (partículas de fundo)
+    updatePlankton(t);
+    drawPlankton();
+
+    // 4. Bolhas subindo
+    for (const b of bubbles) { b.update(t); b.draw(); }
+
+    // 5. Partículas de rastro dos peixes
     updateParticles();
     drawParticles();
 
-    // Peixes
+    // 6. Peixes
     for (const f of school) { f.update(); f.draw(); }
 
-    // Cursor personalizado (desenhado por cima de tudo)
+    // 7. Vinheta (borda escura, por cima de tudo)
+    drawVignette();
+
+    // 8. Cursor personalizado (por cima de TUDO)
     drawCursor();
 
     requestAnimationFrame(loop);

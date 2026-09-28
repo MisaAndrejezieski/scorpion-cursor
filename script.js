@@ -32,7 +32,7 @@ const CONFIG = {
     dashDuration: 0.25,
     dashCooldown: 0.8,
     respawnDelay: 1.5,
-    playerInvuln: 3.0,        // segundos de invulnerabilidade ao nascer
+    playerInvuln: 600.0,        // segundos de invulnerabilidade ao nascer
     safeSpawnDist: 250        // distância mínima do NPC ao jogador
 };
 

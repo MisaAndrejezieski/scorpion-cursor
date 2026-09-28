@@ -1,0 +1,15 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #0a0a0a;
+    overflow: hidden;
+    cursor: none; /* esconde o cursor padrão — o escorpião é o cursor */
+}
+
+canvas {
+    display: block;
+}

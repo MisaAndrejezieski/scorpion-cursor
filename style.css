@@ -10,6 +10,7 @@ html, body {
     overflow: hidden;
     background: #0a0a14;
     cursor: none;
+    font-family: 'Segoe UI', sans-serif;
 }
 
 canvas {

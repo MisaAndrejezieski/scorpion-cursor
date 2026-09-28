@@ -1,6 +1,6 @@
 // ============================================================
-//   NEON FISH — v3.1
-//   Predador com feedback visual forte
+//   NEON FISH — v3.2
+//   Predador + cenário de fundo do mar + câmera dinâmica
 // ============================================================
 
 const canvas = document.getElementById('canvas');
@@ -21,19 +21,23 @@ const CONFIG = {
     npcCount: 12,
     playerStartSize: 24,
     npcMinSize: 12,
-    npcMaxSize: 42,
+    npcMaxSize: 45,
     eatRatio: 0.85,
     speedBase: 2.4,
     hungerMax: 100,
-    hungerDrain: 0.25,        // mais lento
-    hungerPerEat: 35,         // cura mais
+    hungerDrain: 0.25,
+    hungerPerEat: 35,
     growthPerEat: 0.18,
     dashMultiplier: 3.5,
     dashDuration: 0.25,
     dashCooldown: 0.8,
     respawnDelay: 1.5,
-    playerInvuln: 600.0,        // segundos de invulnerabilidade ao nascer
-    safeSpawnDist: 250        // distância mínima do NPC ao jogador
+    playerInvuln: 3.0,
+    safeSpawnDist: 250,
+    // Câmera:
+    zoomBase: 1.0,       // zoom quando você é pequeno
+    zoomMin: 0.55,       // zoom mínimo (máximo de afastamento)
+    zoomReference: 60    // tamanho de referência para atingir o zoomMin
 };
 
 // ============================================================
@@ -88,28 +92,171 @@ let startTime = performance.now();
 let lastTime = startTime;
 let gameOverTime = 0;
 let respawnQueue = [];
-let dangerLevel = 0; // 0..1 — quanto perigo o jogador está correndo
+let dangerLevel = 0;
+
+// Câmera
+let camera = { x: 0, y: 0, zoom: 1 };
 
 // ============================================================
-//   Cenário
+//   Cenário — Corais e algas decorativas
 // ============================================================
-function drawBackground() {
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#0f1a2e');
-    grad.addColorStop(0.5, '#0a1220');
-    grad.addColorStop(1, '#050810');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
+const corais = [];
+function initCorais() {
+    corais.length = 0;
+    for (let i = 0; i < 10; i++) {
+        corais.push({
+            x: Math.random() * W,
+            baseY: H - 20 - Math.random() * 30,
+            height: 40 + Math.random() * 90,
+            width: 20 + Math.random() * 25,
+            hue: ['120, 200, 160', '255, 175, 204', '200, 182, 255', '255, 214, 165'][Math.floor(Math.random() * 4)],
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+}
+function drawCorais(t) {
+    for (const c of corais) {
+        ctx.save();
+        // Talo
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(${c.hue}, 0.35)`;
+        ctx.lineWidth = 4;
+        ctx.moveTo(c.x, c.baseY);
+        const sway = Math.sin(t * 0.5 + c.phase) * 4;
+        ctx.quadraticCurveTo(c.x + sway * 0.5, c.baseY - c.height * 0.5,
+                              c.x + sway, c.baseY - c.height);
+        ctx.stroke();
+
+        // Ramos (3 pares)
+        for (let i = 1; i <= 3; i++) {
+            const p = i / 4;
+            const bx = c.x + sway * p;
+            const by = c.baseY - c.height * p;
+            const side = i % 2 === 0 ? 1 : -1;
+            ctx.beginPath();
+            ctx.strokeStyle = `rgba(${c.hue}, 0.28)`;
+            ctx.lineWidth = 3;
+            ctx.moveTo(bx, by);
+            ctx.quadraticCurveTo(
+                bx + side * c.width * 0.5,
+                by - 10,
+                bx + side * c.width,
+                by - 20
+            );
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
 }
 
+// Rochas no fundo
+const rochas = [];
+function initRochas() {
+    rochas.length = 0;
+    for (let i = 0; i < 12; i++) {
+        const r = 15 + Math.random() * 35;
+        rochas.push({
+            x: Math.random() * W,
+            y: H - r * 0.3 - Math.random() * 15,
+            r
+        });
+    }
+}
+function drawRochas() {
+    for (const r of rochas) {
+        ctx.save();
+        const grad = ctx.createRadialGradient(r.x, r.y - r.r * 0.4, 0, r.x, r.y, r.r);
+        grad.addColorStop(0, 'rgba(60, 70, 90, 0.9)');
+        grad.addColorStop(1, 'rgba(20, 25, 40, 0.9)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(r.x, r.y, r.r, r.r * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+// Algas altas no fundo
+const algas = [];
+function initAlgas() {
+    algas.length = 0;
+    for (let i = 0; i < 8; i++) {
+        const blades = 2 + Math.floor(Math.random() * 3);
+        const bladesArr = [];
+        for (let b = 0; b < blades; b++) {
+            bladesArr.push({
+                offset: (b - (blades - 1) / 2) * 8,
+                height: 60 + Math.random() * 100,
+                phase: Math.random() * Math.PI * 2,
+                width: 3 + Math.random() * 2
+            });
+        }
+        algas.push({
+            x: 40 + Math.random() * (W - 80),
+            baseY: H - 5,
+            blades: bladesArr,
+            hue: Math.random() < 0.5 ? '140, 200, 160' : '100, 170, 150'
+        });
+    }
+}
+function drawAlgas(t) {
+    for (const a of algas) {
+        for (const b of a.blades) {
+            const x0 = a.x + b.offset;
+            ctx.beginPath();
+            ctx.strokeStyle = `rgba(${a.hue}, 0.5)`;
+            ctx.lineWidth = b.width;
+            ctx.lineCap = 'round';
+            ctx.moveTo(x0, a.baseY);
+
+            const segments = 6;
+            for (let s = 1; s <= segments; s++) {
+                const p = s / segments;
+                const sway = Math.sin(t * 1.2 + b.phase + p * 2) * p * 18;
+                const y = a.baseY - b.height * p;
+                const x = x0 + sway;
+                ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+    }
+}
+
+// Textura do chão (areia/limo)
+function drawSeafloor() {
+    const grad = ctx.createLinearGradient(0, H - 80, 0, H);
+    grad.addColorStop(0, 'rgba(30, 40, 60, 0)');
+    grad.addColorStop(0.4, 'rgba(25, 32, 50, 0.5)');
+    grad.addColorStop(1, 'rgba(15, 20, 35, 0.9)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, H - 80, W, 80);
+
+    // Brilho no fundo
+    ctx.save();
+    ctx.shadowColor = 'rgba(120, 180, 220, 0.15)';
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = 'rgba(80, 130, 180, 0.15)';
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += 40) {
+        const y = H - 30 - Math.sin(x * 0.01) * 15 - Math.random() * 8;
+        ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
+// Raios de luz do topo (mais visíveis agora)
 const godRays = [];
 function initGodRays() {
     godRays.length = 0;
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 8; i++) {
         godRays.push({
-            x: (i / 6) * W + (Math.random() - 0.5) * 100,
-            width: 60 + Math.random() * 120,
-            alpha: 0.03 + Math.random() * 0.05,
+            x: (i / 7) * W + (Math.random() - 0.5) * 100,
+            width: 60 + Math.random() * 130,
+            alpha: 0.05 + Math.random() * 0.07,
             speed: 0.02 + Math.random() * 0.04,
             phase: Math.random() * Math.PI * 2,
             length: H * (0.7 + Math.random() * 0.3)
@@ -121,8 +268,8 @@ function drawGodRays(t) {
         const offset = Math.sin(t * ray.speed + ray.phase) * 30;
         const x = ray.x + offset;
         const grad = ctx.createLinearGradient(x, 0, x + ray.width * 0.5, ray.length);
-        grad.addColorStop(0, `rgba(180, 220, 255, ${ray.alpha})`);
-        grad.addColorStop(0.5, `rgba(140, 200, 255, ${ray.alpha * 0.5})`);
+        grad.addColorStop(0, `rgba(180, 220, 255, ${ray.alpha * 1.4})`);
+        grad.addColorStop(0.5, `rgba(140, 200, 255, ${ray.alpha * 0.6})`);
         grad.addColorStop(1, 'rgba(140, 200, 255, 0)');
         ctx.fillStyle = grad;
         ctx.beginPath();
@@ -135,16 +282,28 @@ function drawGodRays(t) {
     }
 }
 
+// Reflexos de onda no topo
+function drawSurface(t) {
+    ctx.save();
+    const grad = ctx.createLinearGradient(0, 0, 0, 60);
+    grad.addColorStop(0, 'rgba(120, 180, 255, 0.25)');
+    grad.addColorStop(1, 'rgba(120, 180, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, 60);
+    ctx.restore();
+}
+
+// Plâncton
 const plankton = [];
 function initPlankton() {
     plankton.length = 0;
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 130; i++) {
         plankton.push({
             x: Math.random() * W,
             y: Math.random() * H,
             vx: (Math.random() - 0.5) * 0.15,
             vy: (Math.random() - 0.5) * 0.15,
-            r: 0.6 + Math.random() * 1.4,
+            r: 0.5 + Math.random() * 1.6,
             alpha: 0.15 + Math.random() * 0.35,
             phase: Math.random() * Math.PI * 2
         });
@@ -180,7 +339,6 @@ function drawVignette() {
     ctx.fillRect(0, 0, W, H);
 }
 
-// Borda vermelha quando em perigo
 function drawDangerBorder() {
     if (dangerLevel <= 0.01) return;
     const alpha = dangerLevel * 0.5;
@@ -306,7 +464,6 @@ class Fish {
         ctx.shadowColor = `rgba(${this.palette.glow}, 0.9)`;
         ctx.shadowBlur = 12 + this.size * 0.3;
 
-        // Cauda
         ctx.beginPath();
         ctx.fillStyle = this.palette.fin;
         ctx.moveTo(-s * 0.9, 0);
@@ -314,13 +471,11 @@ class Fish {
         ctx.quadraticCurveTo(-s * 1.4, s * 0.5 + wag * s * 0.6, -s * 0.9, 0);
         ctx.fill();
 
-        // Corpo
         ctx.beginPath();
         ctx.fillStyle = this.palette.body;
         ctx.ellipse(0, 0, s, s * 0.55, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Nadadeiras
         ctx.beginPath();
         ctx.fillStyle = this.palette.fin;
         ctx.moveTo(-s * 0.1, -s * 0.5);
@@ -333,7 +488,6 @@ class Fish {
         ctx.quadraticCurveTo(0, s * 1.1, s * 0.4, s * 0.4);
         ctx.fill();
 
-        // Olho
         ctx.shadowBlur = 0;
         ctx.beginPath();
         ctx.fillStyle = '#0a0a14';
@@ -348,9 +502,7 @@ class Fish {
         ctx.restore();
     }
 
-    draw() {
-        this.drawBody();
-    }
+    draw() { this.drawBody(); }
 }
 
 // ============================================================
@@ -374,7 +526,6 @@ class Player extends Fish {
         if (this.dashCooldownTimer <= 0) {
             this.dashTimer = CONFIG.dashDuration;
             this.dashCooldownTimer = CONFIG.dashCooldown;
-            // Rastro de dash
             for (let i = 0; i < 10; i++) {
                 spawnBurst(this.x, this.y, '255, 240, 200', 1);
             }
@@ -383,7 +534,6 @@ class Player extends Fish {
 
     update(dt) {
         if (!this.alive) return;
-
         if (this.invulnTimer > 0) this.invulnTimer -= dt;
 
         this.hunger -= CONFIG.hungerDrain * dt;
@@ -422,40 +572,27 @@ class Player extends Fish {
     }
 
     draw() {
-        // Invulnerabilidade (piscando)
         if (this.invulnTimer > 0) {
             const blink = Math.sin(performance.now() * 0.02) > 0;
-            if (!blink) {
-                this.drawBody();
-                this.drawPlayerMarker();
-                return;
-            }
+            if (!blink) { this.drawBody(); this.drawPlayerMarker(); return; }
         }
 
-        // Fome crítica = pisca vermelho
         const hungerWarn = this.hunger < 25 && this.hunger > 0;
         if (hungerWarn && Math.sin(performance.now() * 0.01) > 0.5) {
             ctx.save();
             ctx.shadowColor = 'rgba(255, 80, 80, 1)';
             ctx.shadowBlur = 30;
         }
-
         this.drawBody();
-
-        if (hungerWarn && Math.sin(performance.now() * 0.01) > 0.5) {
-            ctx.restore();
-        }
-
+        if (hungerWarn && Math.sin(performance.now() * 0.01) > 0.5) ctx.restore();
         this.drawPlayerMarker();
     }
 
-    // Anel + seta "VOCÊ" para identificar o jogador
     drawPlayerMarker() {
         const t = performance.now() * 0.003;
         const pulse = 1 + Math.sin(t * 2) * 0.08;
         const r = this.size * 1.7 * pulse;
 
-        // Anel externo pulsante
         ctx.save();
         ctx.beginPath();
         ctx.strokeStyle = `rgba(255, 240, 200, ${0.5 + Math.sin(t * 3) * 0.3})`;
@@ -466,7 +603,6 @@ class Player extends Fish {
         ctx.stroke();
         ctx.restore();
 
-        // Seta "VOCÊ" acima
         const arrowY = this.y - this.size * 1.8 - 20;
         const bounce = Math.sin(performance.now() * 0.005) * 4;
 
@@ -478,7 +614,6 @@ class Player extends Fish {
         ctx.fillStyle = 'rgba(255, 240, 200, 1)';
         ctx.fillText('VOCÊ', this.x, arrowY + bounce);
 
-        // Triângulo apontando para baixo
         ctx.beginPath();
         ctx.moveTo(this.x - 6, arrowY + bounce + 6);
         ctx.lineTo(this.x + 6, arrowY + bounce + 6);
@@ -499,12 +634,11 @@ class NPC extends Fish {
         this.wanderTarget = { x: Math.random() * W, y: Math.random() * H };
         this.fleeing = false;
         this.chasing = false;
-        this.threatLevel = 0; // 0..1
+        this.threatLevel = 0;
     }
 
     update(dt, allFish) {
         if (!this.alive) return;
-
         const playerRef = player && player.alive ? player : null;
         this.fleeing = false;
         this.chasing = false;
@@ -525,26 +659,18 @@ class NPC extends Fish {
 
             if (dist < perception) {
                 if (playerCanEatMe && !iCanEatPlayer) {
-                    this.wanderTarget = {
-                        x: this.x - dx * 2,
-                        y: this.y - dy * 2
-                    };
+                    this.wanderTarget = { x: this.x - dx * 2, y: this.y - dy * 2 };
                     this.fleeing = true;
                     maxSpeed *= 1.3;
                 } else if (iCanEatPlayer) {
-                    this.wanderTarget = {
-                        x: playerRef.x,
-                        y: playerRef.y
-                    };
+                    this.wanderTarget = { x: playerRef.x, y: playerRef.y };
                     this.chasing = true;
-                    // Ameaça proporcional à proximidade e ao tamanho
                     const sizeAdvantage = this.size / playerRef.size;
                     this.threatLevel = Math.min(1, (1 - dist / perception) * sizeAdvantage * 0.7);
                 }
             }
         }
 
-        // NPC vs NPC
         if (!this.fleeing && !this.chasing) {
             for (const other of allFish) {
                 if (other === this || !other.alive || other === player) continue;
@@ -557,18 +683,12 @@ class NPC extends Fish {
                     const iCanEatOther = this.size > other.size / CONFIG.eatRatio;
 
                     if (otherCanEatMe && !iCanEatOther) {
-                        this.wanderTarget = {
-                            x: this.x - dx * 1.5,
-                            y: this.y - dy * 1.5
-                        };
+                        this.wanderTarget = { x: this.x - dx * 1.5, y: this.y - dy * 1.5 };
                         this.fleeing = true;
                         maxSpeed *= 1.15;
                         break;
                     } else if (iCanEatOther && !this.fleeing) {
-                        this.wanderTarget = {
-                            x: other.x,
-                            y: other.y
-                        };
+                        this.wanderTarget = { x: other.x, y: other.y };
                         this.chasing = true;
                         break;
                     }
@@ -576,7 +696,6 @@ class NPC extends Fish {
             }
         }
 
-        // Vagueia
         if (!this.fleeing && !this.chasing) {
             this.wanderTimer -= dt;
             if (this.wanderTimer <= 0) {
@@ -596,20 +715,15 @@ class NPC extends Fish {
     draw() {
         const p = player;
         if (p && p.alive) {
-            // Jogador pode comer este NPC → contorno verde
-            if (p.size > this.size / CONFIG.eatRatio && this.size > p.size * CONFIG.eatRatio === false) {
-                if (p.size > this.size / CONFIG.eatRatio) {
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.strokeStyle = 'rgba(120, 255, 150, 0.55)';
-                    ctx.lineWidth = 1.5;
-                    ctx.arc(this.x, this.y, this.size * 1.4, 0, Math.PI * 2);
-                    ctx.stroke();
-                    ctx.restore();
-                }
+            if (p.size > this.size / CONFIG.eatRatio) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(120, 255, 150, 0.55)';
+                ctx.lineWidth = 1.5;
+                ctx.arc(this.x, this.y, this.size * 1.4, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
             }
-
-            // Este NPC pode comer o jogador → contorno vermelho
             if (this.size > p.size / CONFIG.eatRatio) {
                 ctx.save();
                 const pulse = 0.5 + Math.sin(performance.now() * 0.008) * 0.3;
@@ -624,7 +738,6 @@ class NPC extends Fish {
             }
         }
 
-        // Aura de perseguição
         if (this.chasing) {
             ctx.save();
             ctx.beginPath();
@@ -644,21 +757,16 @@ class NPC extends Fish {
 // ============================================================
 function spawnNPC() {
     const size = CONFIG.npcMinSize + Math.random() * (CONFIG.npcMaxSize - CONFIG.npcMinSize);
-
-    // Tenta 20 vezes achar posição longe do jogador
-    let x, y;
-    let ok = false;
+    let x, y, ok = false;
     for (let attempt = 0; attempt < 20; attempt++) {
         const margin = 60;
         x = margin + Math.random() * (W - margin * 2);
         y = margin + Math.random() * (H - margin * 2);
-
         if (!player || !player.alive) { ok = true; break; }
         const d = Math.hypot(x - player.x, y - player.y);
         if (d > CONFIG.safeSpawnDist) { ok = true; break; }
     }
-    if (!ok) return; // desiste desse spawn, tenta no próximo frame
-
+    if (!ok) return;
     npcs.push(new NPC(x, y, size, randPalette()));
 }
 
@@ -687,7 +795,6 @@ function checkEat(allFish) {
             const bEatsA = canEat(b, a) && !canEat(a, b);
 
             if (aEatsB) {
-                // b morre
                 if (b === player && player.invulnTimer > 0) continue;
                 if (a === player) player.eat(b);
                 else a.size += b.size * 0.08;
@@ -703,7 +810,6 @@ function checkEat(allFish) {
         }
     }
 
-    // Remove mortos
     for (let i = npcs.length - 1; i >= 0; i--) {
         if (!npcs[i].alive) {
             npcs.splice(i, 1);
@@ -713,19 +819,60 @@ function checkEat(allFish) {
 }
 
 // ============================================================
-//   Cálculo de perigo (para a borda vermelha)
+//   Perigo
 // ============================================================
 function updateDangerLevel() {
-    if (!player || !player.alive) {
-        dangerLevel = 0;
-        return;
-    }
+    if (!player || !player.alive) { dangerLevel = 0; return; }
     let maxThreat = 0;
     for (const npc of npcs) {
         if (npc.threatLevel > maxThreat) maxThreat = npc.threatLevel;
     }
-    // Suaviza a transição
     dangerLevel += (maxThreat - dangerLevel) * 0.15;
+}
+
+// ============================================================
+//   Zoom dinâmico (conforme o jogador cresce, a câmera se afasta)
+// ============================================================
+function updateCamera() {
+    if (!player) return;
+    // Zoom diminui conforme o tamanho aumenta
+    const growth = Math.min(1, (player.size - CONFIG.playerStartSize) /
+                              (CONFIG.zoomReference - CONFIG.playerStartSize));
+    const targetZoom = CONFIG.zoomBase - (CONFIG.zoomBase - CONFIG.zoomMin) * growth;
+    camera.zoom += (targetZoom - camera.zoom) * 0.05;
+}
+
+// Aplica a câmera: zoom + centralização no jogador
+function applyCamera() {
+    if (!player || !player.alive) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        return;
+    }
+    const cx = W / 2;
+    const cy = H / 2;
+    ctx.setTransform(
+        camera.zoom, 0,
+        0, camera.zoom,
+        cx - player.x * camera.zoom,
+        cy - player.y * camera.zoom
+    );
+}
+
+// Como o mundo visual agora é maior que a tela em zoom out,
+// vamos "esticar" o fundo/raios/etc para preencher a tela virtual.
+function getVirtualBounds() {
+    const z = camera.zoom;
+    const halfW = W / (2 * z);
+    const halfH = H / (2 * z);
+    if (!player) return { left: 0, top: 0, right: W, bottom: H, width: W, height: H };
+    return {
+        left: player.x - halfW,
+        top: player.y - halfH,
+        right: player.x + halfW,
+        bottom: player.y + halfH,
+        width: halfW * 2,
+        height: halfH * 2
+    };
 }
 
 // ============================================================
@@ -733,6 +880,8 @@ function updateDangerLevel() {
 // ============================================================
 function drawHUD() {
     ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // HUD sempre em coords de tela
+
     ctx.shadowBlur = 0;
     ctx.font = 'bold 16px "Segoe UI", sans-serif';
     ctx.textBaseline = 'top';
@@ -748,7 +897,6 @@ function drawHUD() {
     ctx.fillStyle = 'rgba(162, 210, 255, 0.9)';
     ctx.fillText(`TAMANHO: ${Math.round(player.size)}`, 24, 72);
 
-    // Barra de fome
     const barW = 220;
     const barH = 16;
     const barX = W - barW - 24;
@@ -775,13 +923,11 @@ function drawHUD() {
     ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.fillText('FOME', barX + 8, barY + 2);
 
-    // Dash
     const dashReady = player.dashCooldownTimer <= 0;
     ctx.font = '11px "Segoe UI", sans-serif';
     ctx.fillStyle = dashReady ? 'rgba(184, 224, 210, 0.85)' : 'rgba(120, 120, 140, 0.5)';
     ctx.fillText(dashReady ? '🖱️ CLIQUE = DASH (pronto)' : '🖱️ CLIQUE = DASH (recarregando)', 24, 96);
 
-    // Legenda de cores
     ctx.font = '11px "Segoe UI", sans-serif';
     ctx.fillStyle = 'rgba(120, 255, 150, 0.7)';
     ctx.fillText('● verde = você pode comer', 24, H - 40);
@@ -795,13 +941,14 @@ function drawHUD() {
 //   Game Over
 // ============================================================
 function drawGameOver() {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     const elapsed = (performance.now() - gameOverTime) / 1000;
     const alpha = Math.min(1, elapsed * 2);
 
     ctx.fillStyle = `rgba(5, 8, 16, ${alpha * 0.8})`;
     ctx.fillRect(0, 0, W, H);
 
-    ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -835,6 +982,7 @@ function drawGameOver() {
 // ============================================================
 function drawCursor() {
     ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.shadowColor = 'rgba(200, 182, 255, 0.9)';
     ctx.shadowBlur = 14;
     ctx.strokeStyle = 'rgba(200, 182, 255, 0.95)';
@@ -869,13 +1017,10 @@ function initGame() {
     gameState = 'playing';
 
     player = new Player();
+    camera.zoom = CONFIG.zoomBase;
 
-    // Spawn inicial longe do jogador
-    for (let i = 0; i < CONFIG.npcCount; i++) {
-        spawnNPC();
-    }
+    for (let i = 0; i < CONFIG.npcCount; i++) spawnNPC();
 
-    // Garante que sempre tenha pelo menos alguns NPCs pequenos
     let smallCount = npcs.filter(n => n.size < player.size * 0.9).length;
     let attempts = 0;
     while (smallCount < 4 && attempts < 50) {
@@ -885,15 +1030,16 @@ function initGame() {
     }
 }
 
-function restartGame() {
-    initGame();
-}
+function restartGame() { initGame(); }
 
 // ============================================================
 //   Loop
 // ============================================================
 initGodRays();
 initPlankton();
+initCorais();
+initRochas();
+initAlgas();
 initGame();
 
 function loop() {
@@ -908,6 +1054,7 @@ function loop() {
         for (const npc of npcs) npc.update(dt, allFish);
         checkEat([player, ...npcs]);
         updateDangerLevel();
+        updateCamera();
     } else {
         const allFish = [...npcs];
         for (const npc of npcs) npc.update(dt, allFish);
@@ -915,7 +1062,6 @@ function loop() {
         dangerLevel = 0;
     }
 
-    // Respawn
     for (let i = respawnQueue.length - 1; i >= 0; i--) {
         if (now >= respawnQueue[i]) {
             respawnQueue.splice(i, 1);
@@ -925,16 +1071,51 @@ function loop() {
 
     updateParticles();
 
-    // Desenho
-    drawBackground();
+    // Reset de transform e limpa
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    // Aplica câmera
+    applyCamera();
+    const bounds = getVirtualBounds();
+
+    // Desenha o cenário no espaço virtual
+    // O fundo precisa cobrir a tela toda, então desenhamos em coords de tela
+    // mas vamos aproveitar a câmera para escalar todos os objetos do mundo
+
+    // Fundo (preenche sempre a tela toda, sem zoom)
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0f1a2e');
+    grad.addColorStop(0.5, '#0a1220');
+    grad.addColorStop(1, '#050810');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    // Aplica zoom pro mundo
+    applyCamera();
+
+    // Agora desenhamos TUDO do mundo no espaço virtual escalado
+    drawSurface(t);
     drawGodRays(t);
     updatePlankton(t);
     drawPlankton();
+
+    // Cenário de fundo
+    drawCorais(t);
+    drawRochas();
+    drawAlgas(t);
+    drawSeafloor();
 
     for (const npc of npcs) npc.draw();
     if (player && player.alive) player.draw();
 
     drawParticles();
+
+    // Volta pra coords de tela para efeitos de tela cheia
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     drawVignette();
     drawDangerBorder();
 

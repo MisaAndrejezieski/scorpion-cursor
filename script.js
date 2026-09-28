@@ -1,198 +1,298 @@
 // ============================================================
-//   SCORPION CURSOR
-//   Uma criatura que persegue o mouse usando Matter.js
+//   NEON FISH
+//   Cardume de peixes pastel que persegue o mouse lentamente
 // ============================================================
 
-const { Engine, World, Bodies, Body, Composite, Constraint } = Matter;
-
-// --- Canvas ---
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
+let W, H;
 function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
 }
 resize();
 window.addEventListener('resize', resize);
 
-// --- Engine de física ---
-const engine = Engine.create();
-const world = engine.world;
-engine.gravity.y = 0; // top-down: sem gravidade
-
 // --- Mouse ---
-const mouse = {
-    x: canvas.width / 2,
-    y: canvas.height / 2
-};
+const mouse = { x: W / 2, y: H / 2 };
 window.addEventListener('mousemove', (e) => {
     mouse.x = e.clientX;
     mouse.y = e.clientY;
 });
+window.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+}, { passive: true });
 
 // ============================================================
-//   Criatura (corrente de nós + patas)
+//   Paleta de cores (neon pastel)
 // ============================================================
-class Scorpion {
-    constructor(segmentCount = 20) {
-        this.nodes = [];
-        this.constraints = [];
-        this.legs = [];
+const PALETTES = [
+    { body: '#c8b6ff', fin: '#ffc8dd', glow: '200, 182, 255' },  // lavanda/rosa
+    { body: '#a2d2ff', fin: '#b8e0d2', glow: '162, 210, 255' },  // ciano/menta
+    { body: '#ffd6a5', fin: '#ffafcc', glow: '255, 214, 165' },  // amarelo/pêssego
+    { body: '#b8e0d2', fin: '#c8b6ff', glow: '184, 224, 210' },  // menta/lavanda
+    { body: '#ffafcc', fin: '#a2d2ff', glow: '255, 175, 204' },  // rosa/ciano
+];
 
-        const startX = canvas.width / 2;
-        const startY = canvas.height / 2;
-
-        // Cria a corrente (rabo → cabeça)
-        let prev = null;
-        for (let i = 0; i < segmentCount; i++) {
-            const radius = 4 + i * 0.6; // engrossa em direção à cabeça
-            const node = Bodies.circle(startX, startY, radius, {
-                frictionAir: 0.4,
-                collisionFilter: { group: -1 } // não colide consigo mesma
-            });
-            this.nodes.push(node);
-            World.add(world, node);
-
-            if (prev) {
-                const constraint = Constraint.create({
-                    bodyA: prev,
-                    bodyB: node,
-                    length: radius + 6,
-                    stiffness: 0.5,
-                    damping: 0.1
-                });
-                this.constraints.push(constraint);
-                World.add(world, constraint);
-            }
-            prev = node;
-        }
-
-        this.head = this.nodes[this.nodes.length - 1];
-
-        // Cria as patas (2 pares, presas ao meio do corpo)
-        const legAnchors = [
-            Math.floor(segmentCount * 0.3),
-            Math.floor(segmentCount * 0.5),
-            Math.floor(segmentCount * 0.7)
-        ];
-        for (const idx of legAnchors) {
-            this.legs.push(this.createLeg(this.nodes[idx], -1));
-            this.legs.push(this.createLeg(this.nodes[idx], +1));
-        }
+// ============================================================
+//   Bolhas de fundo
+// ============================================================
+class Bubble {
+    constructor() {
+        this.reset();
+        this.y = Math.random() * H; // começa em qualquer altura
     }
-
-    createLeg(anchor, side) {
-        const legLength = 30;
-        const foot = Bodies.circle(
-            anchor.position.x + side * legLength,
-            anchor.position.y,
-            3,
-            { frictionAir: 0.3, collisionFilter: { group: -1 } }
-        );
-        World.add(world, foot);
-
-        const constraint = Constraint.create({
-            bodyA: anchor,
-            bodyB: foot,
-            length: legLength,
-            stiffness: 0.3,
-            damping: 0.2
-        });
-        World.add(world, constraint);
-
-        return { foot, constraint, anchor, side };
+    reset() {
+        this.x = Math.random() * W;
+        this.y = H + 20;
+        this.r = 2 + Math.random() * 4;
+        this.speed = 0.2 + Math.random() * 0.5;
+        this.alpha = 0.15 + Math.random() * 0.25;
     }
-
     update() {
-        // A cabeça é atraída para o mouse
-        const dx = mouse.x - this.head.position.x;
-        const dy = mouse.y - this.head.position.y;
-        Body.applyForce(this.head, this.head.position, {
-            x: dx * 0.0006,
-            y: dy * 0.0006
-        });
-
-        // As patas oscilam para frente e para trás (efeito de andar)
-        const t = performance.now() * 0.01;
-        for (let i = 0; i < this.legs.length; i++) {
-            const leg = this.legs[i];
-            const phase = i * Math.PI / 2;
-            const swing = Math.sin(t + phase) * 15;
-            // Empurra a pata levemente para o lado
-            Body.applyForce(leg.foot, leg.foot.position, {
-                x: leg.side * swing * 0.00005,
-                y: Math.cos(t + phase) * 0.00002
-            });
-        }
+        this.y -= this.speed;
+        this.x += Math.sin(this.y * 0.02) * 0.3;
+        if (this.y < -20) this.reset();
     }
-
     draw() {
-        // Corpo (corrente)
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        // Linhas entre os nós
-        for (let i = 0; i < this.nodes.length - 1; i++) {
-            const a = this.nodes[i].position;
-            const b = this.nodes[i + 1].position;
-            const t = i / this.nodes.length;
-
-            ctx.beginPath();
-            ctx.strokeStyle = `rgba(180, 220, 255, ${0.3 + t * 0.7})`;
-            ctx.lineWidth = 2 + t * 4;
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
-            ctx.stroke();
-        }
-
-        // Patas
-        ctx.strokeStyle = 'rgba(120, 180, 240, 0.6)';
-        ctx.lineWidth = 2;
-        for (const leg of this.legs) {
-            ctx.beginPath();
-            ctx.moveTo(leg.anchor.position.x, leg.anchor.position.y);
-            ctx.lineTo(leg.foot.position.x, leg.foot.position.y);
-            ctx.stroke();
-        }
-
-        // Ferroadas / nós (desenha cada nó)
-        for (let i = 0; i < this.nodes.length; i++) {
-            const n = this.nodes[i];
-            const t = i / this.nodes.length;
-            const r = 3 + t * 3;
-
-            ctx.beginPath();
-            ctx.fillStyle = `rgba(200, 230, 255, ${0.4 + t * 0.6})`;
-            ctx.arc(n.position.x, n.position.y, r, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // Cabeça (destaque)
         ctx.beginPath();
-        ctx.fillStyle = '#ff5577';
-        ctx.arc(this.head.position.x, this.head.position.y, 8, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.strokeStyle = `rgba(180, 220, 255, ${this.alpha})`;
+        ctx.lineWidth = 1;
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+}
 
-        // Brilho na cabeça
+const bubbles = [];
+for (let i = 0; i < 40; i++) bubbles.push(new Bubble());
+
+// ============================================================
+//   Partículas de rastro
+// ============================================================
+const particles = [];
+
+function spawnTrail(x, y, colorRgb) {
+    particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 0.5,
+        vy: (Math.random() - 0.5) * 0.5,
+        life: 1,
+        r: 1 + Math.random() * 2,
+        color: colorRgb
+    });
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.02;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    for (const p of particles) {
         ctx.beginPath();
-        ctx.fillStyle = 'rgba(255, 200, 220, 0.8)';
-        ctx.arc(this.head.position.x, this.head.position.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${p.color}, ${p.life * 0.6})`;
+        ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
         ctx.fill();
     }
 }
 
 // ============================================================
-//   Loop principal
+//   Peixe
 // ============================================================
-const scorpion = new Scorpion(22);
+class Fish {
+    constructor(palette, offset) {
+        this.palette = palette;
+        this.offset = offset; // distância do mouse (para o cardume)
 
+        // Posição inicial aleatória
+        this.x = Math.random() * W;
+        this.y = Math.random() * H;
+        this.vx = 0;
+        this.vy = 0;
+        this.angle = 0;
+
+        // Steering
+        this.maxSpeed = 2.2;       // velocidade máxima (devagar!)
+        this.maxForce = 0.05;      // aceleração suave
+        this.perception = 200;     // alcance do mouse
+
+        // Visual
+        this.size = 22 + Math.random() * 8;  // tamanho do corpo
+        this.tailPhase = Math.random() * Math.PI * 2; // fase da ondulação
+    }
+
+    seek(target) {
+        // Steering behavior clássico (Reynolds)
+        let dx = target.x - this.x;
+        let dy = target.y - this.y;
+        const d = Math.hypot(dx, dy) || 1;
+
+        // Velocidade desejada
+        const speed = Math.min(this.maxSpeed, d * 0.02);
+        let desiredX = (dx / d) * speed;
+        let desiredY = (dy / d) * speed;
+
+        // Força de direção
+        let steerX = desiredX - this.vx;
+        let steerY = desiredY - this.vy;
+
+        // Limita a força
+        const sMag = Math.hypot(steerX, steerY);
+        if (sMag > this.maxForce) {
+            steerX = (steerX / sMag) * this.maxForce;
+            steerY = (steerY / sMag) * this.maxForce;
+        }
+
+        this.vx += steerX;
+        this.vy += steerY;
+
+        // Limita a velocidade
+        const vMag = Math.hypot(this.vx, this.vy);
+        if (vMag > this.maxSpeed) {
+            this.vx = (this.vx / vMag) * this.maxSpeed;
+            this.vy = (this.vy / vMag) * this.maxSpeed;
+        }
+    }
+
+    update() {
+        // O alvo é o mouse com um pequeno offset (para formar cardume)
+        const target = {
+            x: mouse.x + Math.cos(this.offset) * 60,
+            y: mouse.y + Math.sin(this.offset) * 60
+        };
+        this.seek(target);
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Vira suavemente para a direção do movimento
+        const targetAngle = Math.atan2(this.vy, this.vx);
+        let diff = targetAngle - this.angle;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        this.angle += diff * 0.08;
+
+        // Fase da cauda depende da velocidade
+        const speed = Math.hypot(this.vx, this.vy);
+        this.tailPhase += 0.15 + speed * 0.1;
+
+        // Rastro quando nada rápido
+        if (speed > 0.5 && Math.random() < 0.3) {
+            spawnTrail(
+                this.x - Math.cos(this.angle) * this.size * 0.8,
+                this.y - Math.sin(this.angle) * this.size * 0.8,
+                this.palette.glow
+            );
+        }
+
+        // Envolve nas bordas
+        if (this.x < -50) this.x = W + 50;
+        if (this.x > W + 50) this.x = -50;
+        if (this.y < -50) this.y = H + 50;
+        if (this.y > H + 50) this.y = -50;
+    }
+
+    draw() {
+        const s = this.size;
+        const wag = Math.sin(this.tailPhase) * 0.4; // ondulação da cauda
+
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+
+        // Glow geral
+        ctx.shadowColor = `rgba(${this.palette.glow}, 0.9)`;
+        ctx.shadowBlur = 18;
+
+        // --- Cauda (triângulo que balança) ---
+        ctx.beginPath();
+        ctx.fillStyle = this.palette.fin;
+        ctx.moveTo(-s * 0.9, 0);
+        ctx.quadraticCurveTo(
+            -s * 1.4, -s * 0.5 + wag * s * 0.6,
+            -s * 1.7, wag * s * 0.8
+        );
+        ctx.quadraticCurveTo(
+            -s * 1.4, s * 0.5 + wag * s * 0.6,
+            -s * 0.9, 0
+        );
+        ctx.fill();
+
+        // --- Corpo (elipse) ---
+        ctx.beginPath();
+        ctx.fillStyle = this.palette.body;
+        ctx.ellipse(0, 0, s, s * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // --- Nadadeira superior ---
+        ctx.beginPath();
+        ctx.fillStyle = this.palette.fin;
+        ctx.moveTo(-s * 0.1, -s * 0.5);
+        ctx.quadraticCurveTo(0, -s * 1.1, s * 0.4, -s * 0.4);
+        ctx.fill();
+
+        // --- Nadadeira inferior ---
+        ctx.beginPath();
+        ctx.fillStyle = this.palette.fin;
+        ctx.moveTo(-s * 0.1, s * 0.5);
+        ctx.quadraticCurveTo(0, s * 1.1, s * 0.4, s * 0.4);
+        ctx.fill();
+
+        // --- Olho ---
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.fillStyle = '#0a0a14';
+        ctx.arc(s * 0.55, -s * 0.1, s * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Brilho do olho
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.arc(s * 0.58, -s * 0.14, s * 0.04, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+}
+
+// ============================================================
+//   Cria o cardume
+// ============================================================
+const school = [];
+const fishCount = 5;
+for (let i = 0; i < fishCount; i++) {
+    const angle = (i / fishCount) * Math.PI * 2;
+    school.push(new Fish(PALETTES[i % PALETTES.length], angle));
+}
+
+// ============================================================
+//   Loop
+// ============================================================
 function loop() {
-    scorpion.update();
-    Engine.update(engine, 1000 / 60);
+    // Fundo com leve gradiente (efeito de água profunda)
+    const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H));
+    grad.addColorStop(0, '#12121f');
+    grad.addColorStop(1, '#0a0a14');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    scorpion.draw();
+    // Bolhas ao fundo
+    for (const b of bubbles) { b.update(); b.draw(); }
+
+    // Partículas de rastro
+    updateParticles();
+    drawParticles();
+
+    // Peixes
+    for (const f of school) { f.update(); f.draw(); }
 
     requestAnimationFrame(loop);
 }

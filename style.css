@@ -9,7 +9,7 @@ html, body {
     height: 100%;
     overflow: hidden;
     background: #0a0a14;
-    cursor: default;
+    cursor: none;
 }
 
 canvas {

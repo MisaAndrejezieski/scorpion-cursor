@@ -1,6 +1,7 @@
 // ============================================================
 //   NEON FISH
 //   Cardume de peixes pastel que persegue o mouse lentamente
+//   + cursor personalizado em cruz neon
 // ============================================================
 
 const canvas = document.getElementById('canvas');
@@ -43,7 +44,7 @@ const PALETTES = [
 class Bubble {
     constructor() {
         this.reset();
-        this.y = Math.random() * H; // começa em qualquer altura
+        this.y = Math.random() * H;
     }
     reset() {
         this.x = Math.random() * W;
@@ -110,9 +111,8 @@ function drawParticles() {
 class Fish {
     constructor(palette, offset) {
         this.palette = palette;
-        this.offset = offset; // distância do mouse (para o cardume)
+        this.offset = offset;
 
-        // Posição inicial aleatória
         this.x = Math.random() * W;
         this.y = Math.random() * H;
         this.vx = 0;
@@ -120,31 +120,27 @@ class Fish {
         this.angle = 0;
 
         // Steering
-        this.maxSpeed = 2.2;       // velocidade máxima (devagar!)
-        this.maxForce = 0.05;      // aceleração suave
-        this.perception = 200;     // alcance do mouse
+        this.maxSpeed = 2.2;
+        this.maxForce = 0.05;
+        this.perception = 200;
 
         // Visual
-        this.size = 22 + Math.random() * 8;  // tamanho do corpo
-        this.tailPhase = Math.random() * Math.PI * 2; // fase da ondulação
+        this.size = 22 + Math.random() * 8;
+        this.tailPhase = Math.random() * Math.PI * 2;
     }
 
     seek(target) {
-        // Steering behavior clássico (Reynolds)
         let dx = target.x - this.x;
         let dy = target.y - this.y;
         const d = Math.hypot(dx, dy) || 1;
 
-        // Velocidade desejada
         const speed = Math.min(this.maxSpeed, d * 0.02);
         let desiredX = (dx / d) * speed;
         let desiredY = (dy / d) * speed;
 
-        // Força de direção
         let steerX = desiredX - this.vx;
         let steerY = desiredY - this.vy;
 
-        // Limita a força
         const sMag = Math.hypot(steerX, steerY);
         if (sMag > this.maxForce) {
             steerX = (steerX / sMag) * this.maxForce;
@@ -154,7 +150,6 @@ class Fish {
         this.vx += steerX;
         this.vy += steerY;
 
-        // Limita a velocidade
         const vMag = Math.hypot(this.vx, this.vy);
         if (vMag > this.maxSpeed) {
             this.vx = (this.vx / vMag) * this.maxSpeed;
@@ -163,7 +158,6 @@ class Fish {
     }
 
     update() {
-        // O alvo é o mouse com um pequeno offset (para formar cardume)
         const target = {
             x: mouse.x + Math.cos(this.offset) * 60,
             y: mouse.y + Math.sin(this.offset) * 60
@@ -173,18 +167,15 @@ class Fish {
         this.x += this.vx;
         this.y += this.vy;
 
-        // Vira suavemente para a direção do movimento
         const targetAngle = Math.atan2(this.vy, this.vx);
         let diff = targetAngle - this.angle;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
         this.angle += diff * 0.08;
 
-        // Fase da cauda depende da velocidade
         const speed = Math.hypot(this.vx, this.vy);
         this.tailPhase += 0.15 + speed * 0.1;
 
-        // Rastro quando nada rápido
         if (speed > 0.5 && Math.random() < 0.3) {
             spawnTrail(
                 this.x - Math.cos(this.angle) * this.size * 0.8,
@@ -193,7 +184,6 @@ class Fish {
             );
         }
 
-        // Envolve nas bordas
         if (this.x < -50) this.x = W + 50;
         if (this.x > W + 50) this.x = -50;
         if (this.y < -50) this.y = H + 50;
@@ -202,17 +192,16 @@ class Fish {
 
     draw() {
         const s = this.size;
-        const wag = Math.sin(this.tailPhase) * 0.4; // ondulação da cauda
+        const wag = Math.sin(this.tailPhase) * 0.4;
 
         ctx.save();
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
 
-        // Glow geral
         ctx.shadowColor = `rgba(${this.palette.glow}, 0.9)`;
         ctx.shadowBlur = 18;
 
-        // --- Cauda (triângulo que balança) ---
+        // Cauda
         ctx.beginPath();
         ctx.fillStyle = this.palette.fin;
         ctx.moveTo(-s * 0.9, 0);
@@ -226,34 +215,33 @@ class Fish {
         );
         ctx.fill();
 
-        // --- Corpo (elipse) ---
+        // Corpo
         ctx.beginPath();
         ctx.fillStyle = this.palette.body;
         ctx.ellipse(0, 0, s, s * 0.55, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // --- Nadadeira superior ---
+        // Nadadeira superior
         ctx.beginPath();
         ctx.fillStyle = this.palette.fin;
         ctx.moveTo(-s * 0.1, -s * 0.5);
         ctx.quadraticCurveTo(0, -s * 1.1, s * 0.4, -s * 0.4);
         ctx.fill();
 
-        // --- Nadadeira inferior ---
+        // Nadadeira inferior
         ctx.beginPath();
         ctx.fillStyle = this.palette.fin;
         ctx.moveTo(-s * 0.1, s * 0.5);
         ctx.quadraticCurveTo(0, s * 1.1, s * 0.4, s * 0.4);
         ctx.fill();
 
-        // --- Olho ---
+        // Olho
         ctx.shadowBlur = 0;
         ctx.beginPath();
         ctx.fillStyle = '#0a0a14';
         ctx.arc(s * 0.55, -s * 0.1, s * 0.12, 0, Math.PI * 2);
         ctx.fill();
 
-        // Brilho do olho
         ctx.beginPath();
         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
         ctx.arc(s * 0.58, -s * 0.14, s * 0.04, 0, Math.PI * 2);
@@ -261,6 +249,40 @@ class Fish {
 
         ctx.restore();
     }
+}
+
+// ============================================================
+//   Cursor personalizado (cruz neon)
+// ============================================================
+function drawCursor() {
+    ctx.save();
+    ctx.shadowColor = 'rgba(200, 182, 255, 0.9)';
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = 'rgba(200, 182, 255, 0.95)';
+    ctx.lineWidth = 1.6;
+
+    // Cruz
+    ctx.beginPath();
+    ctx.moveTo(mouse.x - 9, mouse.y);
+    ctx.lineTo(mouse.x + 9, mouse.y);
+    ctx.moveTo(mouse.x, mouse.y - 9);
+    ctx.lineTo(mouse.x, mouse.y + 9);
+    ctx.stroke();
+
+    // Anel externo
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255, 200, 220, 0.55)';
+    ctx.lineWidth = 1;
+    ctx.arc(mouse.x, mouse.y, 14, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Ponto central
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255, 200, 220, 0.95)';
+    ctx.arc(mouse.x, mouse.y, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
 }
 
 // ============================================================
@@ -277,7 +299,7 @@ for (let i = 0; i < fishCount; i++) {
 //   Loop
 // ============================================================
 function loop() {
-    // Fundo com leve gradiente (efeito de água profunda)
+    // Fundo com gradiente (efeito de água profunda)
     const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H));
     grad.addColorStop(0, '#12121f');
     grad.addColorStop(1, '#0a0a14');
@@ -293,6 +315,9 @@ function loop() {
 
     // Peixes
     for (const f of school) { f.update(); f.draw(); }
+
+    // Cursor personalizado (desenhado por cima de tudo)
+    drawCursor();
 
     requestAnimationFrame(loop);
 }
